@@ -71,8 +71,6 @@ class remoteThread(QThread):
         if op == 5:
             try:
                 jd = json.loads(data[16:].decode('utf-8', errors='ignore'))
-                # if jd['cmd'] == 'SEND_GIFT':
-                #     print(jd['data']['uname'], ' 投喂 ', jd['data']['num'], 'x', jd['data']['giftName'])
                 if jd['cmd'] == 'COMBO_SEND':
                     d = jd['data']
                     if self.filterToken:
@@ -98,23 +96,30 @@ class remoteThread(QThread):
 class GIFWidget(QWidget):
     finish = Signal()
 
-    def __init__(self, gifPath='', parent=None):
+    def __init__(self, gifPath='', opacity=False, top=True, parent=None):
         super().__init__(parent)
         self.mousePressToken = False
         self.executeToken = False
         self.resize(300, 300)
-        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setWindowTitle('答谢特效')
+        # self.setStyleSheet('background-color:#00d600')
+        if opacity:
+            self.setAttribute(Qt.WA_TranslucentBackground)
         self.setWindowFlag(Qt.FramelessWindowHint)
-        self.setWindowFlag(Qt.WindowStaysOnTopHint)
+        if top:
+            self.setWindowFlag(Qt.WindowStaysOnTopHint)
         self.show()
         layout = QGridLayout()
         self.setLayout(layout)
 
-        self.showText = QLabel('感谢 甲鱼 投喂的\n100个小心心')
+        self.showText = QLabel('感谢 DD 投喂的\n100个小心心')
         self.showText.setStyleSheet("QLabel{color:#00CED1;font-size:22px;font-weight:bold;font-family:Yahei;}")
         self.showText.setAlignment(Qt.AlignCenter)
         self.showText.setAttribute(Qt.WA_TranslucentBackground)
         layout.addWidget(self.showText, 1, 0, 1, 1)
+        self.textOpacity = QGraphicsOpacityEffect()
+        self.showText.setGraphicsEffect(self.textOpacity)
+        self.textOpacity.setOpacity(1)
 
         self.showGIF = QLabel()
         self.showGIF.setAttribute(Qt.WA_TranslucentBackground)
@@ -124,6 +129,9 @@ class GIFWidget(QWidget):
             movie = QMovie(gifPath)
             self.showGIF.setMovie(movie)
             movie.start()
+        self.gifOpacity = QGraphicsOpacityEffect()
+        self.showGIF.setGraphicsEffect(self.gifOpacity)
+        self.gifOpacity.setOpacity(1)
 
         self.frame = 180
         self.animationTimer = QTimer()
@@ -140,6 +148,9 @@ class GIFWidget(QWidget):
 
     def setColor(self, color):
         self.showText.setStyleSheet('color:' + color)
+
+    def setBackgroundColor(self, color):
+        self.setStyleSheet('background-color:%s' % color)
 
     def setGiftInfo(self, giftInfo):
         self.showText.setText('感谢 %s 投喂的\n%s个%s' % tuple(giftInfo))
@@ -159,22 +170,30 @@ class GIFWidget(QWidget):
             self.move(self.pos() + (QEvent.pos() - self.startPos))
 
     def playAnimate(self):
-        if self.frame > 160:
-            self.setWindowOpacity((180 - self.frame) / 20)
+        if self.frame >= 170:
+            self.gifOpacity.setOpacity((180 - self.frame) / 10)
+            self.textOpacity.setOpacity((180 - self.frame) / 10)
+            # self.setWindowOpacity((180 - self.frame) / 20)
             self.frame -= 1
-        elif self.frame > 60:
+        elif self.frame > 20:
             self.frame -= 1
         elif self.frame > 0:
-            self.setWindowOpacity(self.frame / 60)
+            self.gifOpacity.setOpacity(self.frame / 20)
+            self.textOpacity.setOpacity(self.frame / 20)
+            # self.setWindowOpacity(self.frame / 60)
             self.frame -= 1
         else:
             self.frame = 180
             self.animationTimer.stop()
             if not self.executeToken:
-                self.setWindowOpacity(1)
-                self.showText.setText('感谢 甲鱼 投喂的\n100个小心心')
+                self.gifOpacity.setOpacity(1)
+                self.textOpacity.setOpacity(1)
+                # self.setWindowOpacity(1)
+                self.showText.setText('感谢 DD 投喂的\n100个小心心')
             else:
-                self.setWindowOpacity(0)
+                self.gifOpacity.setOpacity(0)
+                self.textOpacity.setOpacity(0)
+                # self.setWindowOpacity(0)
                 self.showText.setText('')
             self.finish.emit()
 
@@ -204,9 +223,13 @@ class MainWindow(QMainWindow):
             self.config = json.loads(config)
         else:
             self.config = {'room_url': '', 'bgm_path': '', 'gif_path': '', 'font_color': '#000000',
-                           'font_name': 'yahei', 'font_size': '10', 'font_bold': '0', 'font_italic': '0',
-                           'guard_text_before': '恭迎', 'guard_text_after': '舰长登船~~', 'filter': '1'}
-        self.GIFWidget = GIFWidget(self.config['gif_path'])
+                           'font_name': '微软雅黑', 'font_size': '10', 'font_bold': '0', 'font_italic': '0',
+                           'guard_text_before': '恭迎', 'guard_text_after': '舰长登船~~', 'filter': '1',
+                           'background_color': '#00d600', 'opacity_color': '0', 'top': '1'}
+        self.opacityColorToken = True if self.config['opacity_color'] == '1' else False
+        self.stayTopToken = True if self.config['top'] == '1' else False
+        self.GIFWidget = GIFWidget(self.config['gif_path'], self.opacityColorToken, self.stayTopToken)
+        self.GIFWidget.setBackgroundColor(self.config['background_color'])
         self.GIFWidget.finish.connect(self.animateFinish)
 
         self.setWindowTitle('B站直播打赏感谢机 测试版   (by up 执鸣神君)')
@@ -237,8 +260,13 @@ class MainWindow(QMainWindow):
         if self.config['font_italic'] == '1':
             self.font.setItalic(True)
         self.color = self.config['font_color']
-        self.fontLabel = QLabel('感谢甲鱼投喂的100个小心心')
-        self.fontLabel.setFont(self.font)
+        self.fontLabel = QLabel()
+        fontInfo = '%s  %s  %s  ' % (self.config['font_name'], self.config['font_size'], self.config['font_color'])
+        if self.config['font_bold'] == '1':
+            fontInfo += '加粗  '
+        if self.config['font_italic'] == '1':
+            fontInfo += '斜体'
+        self.fontLabel.setText(fontInfo)
         self.fontLabel.setStyleSheet('color:' + self.color)
         self.GIFWidget.setFont(self.font)
         self.GIFWidget.setColor(self.color)
@@ -255,7 +283,7 @@ class MainWindow(QMainWindow):
         self.guardEditAfter = QLineEdit(self.config['guard_text_after'])
         layout.addWidget(self.guardEditAfter, 3, 5, 1, 2)
 
-        self.filterToken = True if int(self.config['filter']) == 1 else False
+        self.filterToken = True if self.config['filter'] == '1' else False
         if self.filterToken:
             self.filterButton = QPushButton('过滤银币礼物')
             self.filterButton.setStyleSheet('background-color:#3daee9')
@@ -265,22 +293,46 @@ class MainWindow(QMainWindow):
         self.filterButton.clicked.connect(self.changeFilter)
         layout.addWidget(self.filterButton, 4, 0, 1, 1)
 
+        backgroundColorButton = QPushButton('背景颜色')
+        backgroundColorButton.clicked.connect(self.selectBackgroundColor)
+        layout.addWidget(backgroundColorButton, 4, 2, 1, 1)
+        self.backgroundColorLabel = QLabel(self.config['background_color'])
+        self.backgroundColorLabel.setStyleSheet('color:%s' % self.config['background_color'])
+        layout.addWidget(self.backgroundColorLabel, 4, 3, 1, 1)
+
+
+        self.stayTopButton = QPushButton('特效窗口置顶 (重启生效)')
+        self.stayTopButton.clicked.connect(self.setTop)
+        if self.stayTopToken:
+            self.stayTopButton.setStyleSheet('background-color:#3daee9')
+        else:
+            self.stayTopButton.setStyleSheet('background-color:#31363b')
+        layout.addWidget(self.stayTopButton, 5, 0, 1, 2)
+
+        self.opacityColorButton = QPushButton('透明背景 (重启生效)')
+        self.opacityColorButton.clicked.connect(self.setOpacityColor)
+        if self.opacityColorToken:
+            self.opacityColorButton.setStyleSheet('background-color:#3daee9')
+        else:
+            self.opacityColorButton.setStyleSheet('background-color:#31363b')
+        layout.addWidget(self.opacityColorButton, 4, 5, 1, 2)
+
         self.preview = previewLabel('点击或拖入要播放的答谢gif动图')
         self.preview.click.connect(self.click)
         if self.config['gif_path']:
             movie = QMovie(self.config['gif_path'])
             self.preview.setMovie(movie)
             movie.start()
-        layout.addWidget(self.preview, 5, 0, 5, 7)
+        layout.addWidget(self.preview, 6, 0, 5, 7)
 
         self.testButton = QPushButton('测试一下')
         self.testButton.clicked.connect(self.testAnimate)
         self.testButton.setFixedSize(200, 65)
-        layout.addWidget(self.testButton, 10, 0, 2, 3)
+        layout.addWidget(self.testButton, 11, 0, 2, 3)
         self.startButton = QPushButton('开始捕获')
         self.startButton.clicked.connect(self.startMonitor)
         self.startButton.setFixedSize(200, 65)
-        layout.addWidget(self.startButton, 10, 4, 2, 3)
+        layout.addWidget(self.startButton, 11, 4, 2, 3)
 
     def changeFilter(self):
         if self.filterToken:
@@ -305,6 +357,31 @@ class MainWindow(QMainWindow):
                 shutil.copy(filePath, 'bgm')
             self.bgmEdit.setText(filePath)
             self.sound.setMedia(QUrl.fromLocalFile(filePath))
+
+    def selectBackgroundColor(self):
+        color = QColorDialog.getColor(self.config['background_color'])
+        if color.isValid():
+            color = color.name()
+            self.config['background_color'] = color
+            self.backgroundColorLabel.setText(color)
+            self.backgroundColorLabel.setStyleSheet('color:%s' % color)
+            self.GIFWidget.setBackgroundColor(color)
+
+    def setTop(self):
+        self.stayTopToken = not self.stayTopToken
+        if self.stayTopToken:
+            self.stayTopButton.setStyleSheet('background-color:#3daee9')
+        else:
+            self.stayTopButton.setStyleSheet('background-color:#31363b')
+        self.config['top'] = '1' if self.stayTopToken else '0'
+
+    def setOpacityColor(self):
+        self.opacityColorToken = not self.opacityColorToken
+        if self.opacityColorToken:
+            self.opacityColorButton.setStyleSheet('background-color:#3daee9')
+        else:
+            self.opacityColorButton.setStyleSheet('background-color:#31363b')
+        self.config['opacity_color'] = '1' if self.opacityColorToken else '0'
 
     def click(self):
         filePath = QFileDialog.getOpenFileName(self, "请选择gif文件", 'gif', "*.gif")[0]
@@ -358,14 +435,19 @@ class MainWindow(QMainWindow):
             self.config['font_size'] = fontSize
             self.config['font_bold'] = '1' if fontBold else '0'
             self.config['font_italic'] = '1' if fontItalic else '0'
-            self.fontLabel.setFont(self.font)
             self.GIFWidget.setFont(self.font)
         color = QColorDialog.getColor(self.color)
         if color.isValid():
             self.color = color.name()
             self.config['font_color'] = self.color
-            self.fontLabel.setStyleSheet('color:' + self.color)
             self.GIFWidget.setColor(self.color)
+        fontInfo = '%s  %s  %s  ' % (self.config['font_name'], self.config['font_size'], self.config['font_color'])
+        if self.config['font_bold'] == '1':
+            fontInfo += '加粗  '
+        if self.config['font_italic'] == '1':
+            fontInfo += '斜体'
+        self.fontLabel.setText(fontInfo)
+        self.fontLabel.setStyleSheet('color:' + self.color)
 
     def testAnimate(self):
         if self.bgmEdit.text():
@@ -405,7 +487,9 @@ class MainWindow(QMainWindow):
             self.remoteThread.start()
             self.executeToken = True
             self.GIFWidget.executeToken = True
-            self.GIFWidget.setWindowOpacity(0)
+            self.GIFWidget.gifOpacity.setOpacity(0)
+            self.GIFWidget.textOpacity.setOpacity(0)
+            # self.GIFWidget.setWindowOpacity(0)
             self.testButton.setEnabled(False)
             self.startButton.setStyleSheet('background-color:#3daee9')
             self.startButton.setText('停止捕获')
@@ -415,11 +499,13 @@ class MainWindow(QMainWindow):
             self.remoteThread.wait()
             self.executeToken = False
             self.GIFWidget.executeToken = False
-            self.GIFWidget.setWindowOpacity(1)
+            self.GIFWidget.gifOpacity.setOpacity(1)
+            self.GIFWidget.textOpacity.setOpacity(1)
+            # self.GIFWidget.setWindowOpacity(1)
             self.testButton.setEnabled(True)
             self.startButton.setStyleSheet('background-color:#31363b')
             self.startButton.setText('开始捕获')
-            self.GIFWidget.showText.setText('感谢 甲鱼 投喂的\n100个小心心')
+            self.GIFWidget.showText.setText('感谢 DD 投喂的\n100个小心心')
 
 
 if __name__ == '__main__':
