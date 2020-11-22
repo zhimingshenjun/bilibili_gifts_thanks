@@ -1,1 +1,1 @@
-﻿{"room_url": "", "bgm_path": "C:/workspace/B站直播礼物答谢效果/bgm/撒钱.mp3", "gif_path": "C:\\workspace\\B站直播礼物答谢效果/gif/清良.gif", "font_color": "#3db7c2", "font_name": "微软雅黑", "font_size": 19, "font_bold": "1", "font_italic": "0"}
+﻿{"room_url": "https://live.bilibili.com/123456", "bgm_path": "", "gif_path": "", "font_color": "#e78986", "font_name": "微软雅黑", "font_size": 20, "font_bold": "1", "font_italic": "0", "guard_text_before": "恭迎", "guard_text_after": "舰长登船~~", "filter": "1"}

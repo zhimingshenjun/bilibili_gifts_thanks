@@ -15,6 +15,7 @@ from PySide2.QtMultimedia import QMediaPlayer
 
 class remoteThread(QThread):
     giftInfo = Signal(list)
+    guard = Signal(str)
 
     def __init__(self, url):
         super(remoteThread, self).__init__()
@@ -80,6 +81,8 @@ class remoteThread(QThread):
                             self.giftInfo.emit([d['uname'], d['batch_combo_num'], giftName])
                     else:
                         self.giftInfo.emit([d['uname'], d['batch_combo_num'], d['gift_name']])
+                elif jd['cmd'] == 'GUARD_BUY':
+                    self.guard.emit(jd['data']['username'])
             except Exception as e:
                 print(e)
 
@@ -141,6 +144,9 @@ class GIFWidget(QWidget):
     def setGiftInfo(self, giftInfo):
         self.showText.setText('感谢 %s 投喂的\n%s个%s' % tuple(giftInfo))
 
+    def setGuard(self, guardInfo):
+        self.showText.setText('%s %s %s' % tuple(guardInfo))
+
     def mousePressEvent(self, QEvent):
         self.mousePressToken = True
         self.startPos = QEvent.pos()
@@ -198,7 +204,8 @@ class MainWindow(QMainWindow):
             self.config = json.loads(config)
         else:
             self.config = {'room_url': '', 'bgm_path': '', 'gif_path': '', 'font_color': '#000000',
-                           'font_name': 'yahei', 'font_size': '10', 'font_bold': '0', 'font_italic': '0'}
+                           'font_name': 'yahei', 'font_size': '10', 'font_bold': '0', 'font_italic': '0',
+                           'guard_text_before': '恭迎', 'guard_text_after': '舰长登船~~', 'filter': '1'}
         self.GIFWidget = GIFWidget(self.config['gif_path'])
         self.GIFWidget.finish.connect(self.animateFinish)
 
@@ -237,12 +244,26 @@ class MainWindow(QMainWindow):
         self.GIFWidget.setColor(self.color)
         layout.addWidget(self.fontLabel, 2, 2, 1, 5)
 
-        self.filterToken = True
-        self.filterButton = QPushButton('过滤银币礼物')
-        self.filterButton.setStyleSheet('background-color:#3daee9')
-        self.filterButton.clicked.connect(self.changeFilter)
+        guardLabel = QLabel('舰长专属贺词')
+        guardLabel.setAlignment(Qt.AlignCenter)
+        layout.addWidget(guardLabel, 3, 0, 1, 1)
+        self.guardEditBefore = QLineEdit(self.config['guard_text_before'])
+        layout.addWidget(self.guardEditBefore, 3, 2, 1, 2)
+        guardNameLabel = QLabel('舰长名')
+        guardNameLabel.setAlignment(Qt.AlignCenter)
+        layout.addWidget(guardNameLabel, 3, 4, 1, 1)
+        self.guardEditAfter = QLineEdit(self.config['guard_text_after'])
+        layout.addWidget(self.guardEditAfter, 3, 5, 1, 2)
 
-        layout.addWidget(self.filterButton, 3, 0, 1, 1)
+        self.filterToken = True if int(self.config['filter']) == 1 else False
+        if self.filterToken:
+            self.filterButton = QPushButton('过滤银币礼物')
+            self.filterButton.setStyleSheet('background-color:#3daee9')
+        else:
+            self.filterButton = QPushButton('显示所有礼物')
+            self.filterButton.setStyleSheet('background-color:#31363b')
+        self.filterButton.clicked.connect(self.changeFilter)
+        layout.addWidget(self.filterButton, 4, 0, 1, 1)
 
         self.preview = previewLabel('点击或拖入要播放的答谢gif动图')
         self.preview.click.connect(self.click)
@@ -250,16 +271,16 @@ class MainWindow(QMainWindow):
             movie = QMovie(self.config['gif_path'])
             self.preview.setMovie(movie)
             movie.start()
-        layout.addWidget(self.preview, 4, 0, 5, 7)
+        layout.addWidget(self.preview, 5, 0, 5, 7)
 
         self.testButton = QPushButton('测试一下')
         self.testButton.clicked.connect(self.testAnimate)
         self.testButton.setFixedSize(200, 65)
-        layout.addWidget(self.testButton, 9, 0, 2, 3)
+        layout.addWidget(self.testButton, 10, 0, 2, 3)
         self.startButton = QPushButton('开始捕获')
         self.startButton.clicked.connect(self.startMonitor)
         self.startButton.setFixedSize(200, 65)
-        layout.addWidget(self.startButton, 9, 4, 2, 3)
+        layout.addWidget(self.startButton, 10, 4, 2, 3)
 
     def changeFilter(self):
         if self.filterToken:
@@ -314,6 +335,9 @@ class MainWindow(QMainWindow):
         self.GIFWidget.close()
         self.config['room_url'] = self.roomURLEdit.text()
         self.config['bgm_path'] = self.bgmEdit.text()
+        self.config['guard_text_before'] = self.guardEditBefore.text()
+        self.config['guard_text_after'] = self.guardEditAfter.text()
+        self.config['filter'] = '1' if self.filterToken else '0'
         with codecs.open('config.json', 'w', 'utf_8_sig') as config:
             config.write(json.dumps(self.config, ensure_ascii=False))
 
@@ -355,6 +379,20 @@ class MainWindow(QMainWindow):
         self.GIFWidget.frame = 180
         self.GIFWidget.animationTimer.start()
 
+    def playGuardAnimate(self, guardName):
+        if self.bgmEdit.text():
+            self.sound.play()
+        guardTextBefore = self.guardEditBefore.text()
+        guardTextAfter = self.guardEditAfter.text()
+        if not guardTextBefore and not guardTextAfter:
+            guardTextBefore = '恭迎'
+            guardTextAfter = '舰长登船~~'
+            self.guardEditBefore.setText(guardTextBefore)
+            self.guardEditAfter.setText(guardTextAfter)
+        self.GIFWidget.setGuard([guardTextBefore, guardName, guardTextAfter])
+        self.GIFWidget.frame = 180
+        self.GIFWidget.animationTimer.start()
+
     def animateFinish(self):
         self.sound.stop()
 
@@ -362,6 +400,8 @@ class MainWindow(QMainWindow):
         if not self.executeToken:
             self.remoteThread = remoteThread(self.roomURLEdit.text())
             self.remoteThread.giftInfo.connect(self.playAnimate)
+            self.remoteThread.guard.connect(self.playGuardAnimate)
+            self.remoteThread.setFilter(self.filterToken)
             self.remoteThread.start()
             self.executeToken = True
             self.GIFWidget.executeToken = True
@@ -379,6 +419,7 @@ class MainWindow(QMainWindow):
             self.testButton.setEnabled(True)
             self.startButton.setStyleSheet('background-color:#31363b')
             self.startButton.setText('开始捕获')
+            self.GIFWidget.showText.setText('感谢 甲鱼 投喂的\n100个小心心')
 
 
 if __name__ == '__main__':
