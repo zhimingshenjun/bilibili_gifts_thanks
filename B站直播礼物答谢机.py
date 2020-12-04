@@ -2,200 +2,29 @@
 import os
 import sys
 import shutil
-import asyncio
-import zlib
 import json
 import codecs
-from aiowebsocket.converses import AioWebSocket
 from PySide2.QtWidgets import *
 from PySide2.QtGui import *
 from PySide2.QtCore import *
 from PySide2.QtMultimedia import QMediaPlayer
+from remote import remoteThread
+from GIFWidget import GIFWidget
+from option import OptionWidget
 
 
-class remoteThread(QThread):
-    giftInfo = Signal(list)
-    guard = Signal(str)
+class Slider(QSlider):
+    pointClicked = Signal(QPoint)
 
-    def __init__(self, url):
-        super(remoteThread, self).__init__()
-        self.filterToken = True
-        self.roomID = url.split('/')[-1]
-        if '?' in self.roomID:
-            self.roomID = self.roomID.split('?')[0]
+    def __init__(self):
+        super(Slider, self).__init__()
+        self.setOrientation(Qt.Horizontal)
 
-    def setFilter(self, token):
-        self.filterToken = token
+    def mousePressEvent(self, event):
+        self.pointClicked.emit(event.pos())
 
-    async def startup(self, url):
-        data_raw = '000000{headerLen}0010000100000007000000017b22726f6f6d6964223a{roomid}7d'
-        data_raw = data_raw.format(headerLen=hex(27 + len(self.roomID))[2:],
-                                   roomid=''.join(map(lambda x: hex(ord(x))[2:], list(self.roomID))))
-        async with AioWebSocket(url) as aws:
-            converse = aws.manipulator
-            await converse.send(bytes.fromhex(data_raw))
-            tasks = [self.receDM(converse), self.sendHeartBeat(converse)]
-            await asyncio.wait(tasks)
-
-    async def sendHeartBeat(self, websocket):
-        hb = '00000010001000010000000200000001'
-        while True:
-            await asyncio.sleep(30)
-            await websocket.send(bytes.fromhex(hb))
-
-    async def receDM(self, websocket):
-        while True:
-            recv_text = await websocket.receive()
-            self.printDM(recv_text)
-
-    def printDM(self, data):
-        packetLen = int(data[:4].hex(), 16)
-        ver = int(data[6:8].hex(), 16)
-        op = int(data[8:12].hex(), 16)
-
-        if len(data) > packetLen:
-            self.printDM(data[packetLen:])
-            data = data[:packetLen]
-
-        if ver == 2:
-            data = zlib.decompress(data[16:])
-            self.printDM(data)
-            return
-
-        if ver == 1:
-            if op == 3:
-                # print('[RENQI]  {}'.format(int(data[16:].hex(),16)))
-                pass
-            return
-
-        if op == 5:
-            try:
-                jd = json.loads(data[16:].decode('utf-8', errors='ignore'))
-                if jd['cmd'] == 'COMBO_SEND':
-                    d = jd['data']
-                    if self.filterToken:
-                        giftName = d['gift_name']
-                        if giftName not in ['小心心', '辣条']:
-                            self.giftInfo.emit([d['uname'], d['batch_combo_num'], giftName])
-                    else:
-                        self.giftInfo.emit([d['uname'], d['batch_combo_num'], d['gift_name']])
-                elif jd['cmd'] == 'GUARD_BUY':
-                    self.guard.emit(jd['data']['username'])
-            except Exception as e:
-                print(e)
-
-    def run(self):
-        remote = r'wss://broadcastlv.chat.bilibili.com:2245/sub'
-        try:
-            asyncio.set_event_loop(asyncio.new_event_loop())
-            asyncio.get_event_loop().run_until_complete(self.startup(remote))
-        except KeyboardInterrupt as e:
-            print('exit')
-
-
-class GIFWidget(QWidget):
-    finish = Signal()
-
-    def __init__(self, gifPath='', opacity=False, top=True, parent=None):
-        super().__init__(parent)
-        self.mousePressToken = False
-        self.executeToken = False
-        self.resize(300, 300)
-        self.setWindowTitle('答谢特效')
-        # self.setStyleSheet('background-color:#00d600')
-        if opacity:
-            self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setWindowFlag(Qt.FramelessWindowHint)
-        if top:
-            self.setWindowFlag(Qt.WindowStaysOnTopHint)
-        self.show()
-        layout = QGridLayout()
-        self.setLayout(layout)
-
-        self.showText = QLabel('感谢 DD 投喂的\n100个小心心')
-        self.showText.setStyleSheet("QLabel{color:#00CED1;font-size:22px;font-weight:bold;font-family:Yahei;}")
-        self.showText.setAlignment(Qt.AlignCenter)
-        self.showText.setAttribute(Qt.WA_TranslucentBackground)
-        layout.addWidget(self.showText, 1, 0, 1, 1)
-        self.textOpacity = QGraphicsOpacityEffect()
-        self.showText.setGraphicsEffect(self.textOpacity)
-        self.textOpacity.setOpacity(1)
-
-        self.showGIF = QLabel()
-        self.showGIF.setAttribute(Qt.WA_TranslucentBackground)
-        self.showGIF.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self.showGIF, 0, 0, 1, 1)
-        if gifPath:
-            movie = QMovie(gifPath)
-            self.showGIF.setMovie(movie)
-            movie.start()
-        self.gifOpacity = QGraphicsOpacityEffect()
-        self.showGIF.setGraphicsEffect(self.gifOpacity)
-        self.gifOpacity.setOpacity(1)
-
-        self.frame = 180
-        self.animationTimer = QTimer()
-        self.animationTimer.setInterval(16)
-        self.animationTimer.timeout.connect(self.playAnimate)
-
-    def setGIFPath(self, gifPath):
-        movie = QMovie(gifPath)
-        self.showGIF.setMovie(movie)
-        movie.start()
-
-    def setFont(self, font):
-        self.showText.setFont(font)
-
-    def setColor(self, color):
-        self.showText.setStyleSheet('color:' + color)
-
-    def setBackgroundColor(self, color):
-        self.setStyleSheet('background-color:%s' % color)
-
-    def setGiftInfo(self, giftInfo):
-        self.showText.setText('感谢 %s 投喂的\n%s个%s' % tuple(giftInfo))
-
-    def setGuard(self, guardInfo):
-        self.showText.setText('%s %s %s' % tuple(guardInfo))
-
-    def mousePressEvent(self, QEvent):
-        self.mousePressToken = True
-        self.startPos = QEvent.pos()
-
-    def mouseReleaseEvent(self, QEvent):
-        self.mousePressToken = False
-
-    def mouseMoveEvent(self, QEvent):
-        if self.mousePressToken:
-            self.move(self.pos() + (QEvent.pos() - self.startPos))
-
-    def playAnimate(self):
-        if self.frame >= 170:
-            self.gifOpacity.setOpacity((180 - self.frame) / 10)
-            self.textOpacity.setOpacity((180 - self.frame) / 10)
-            # self.setWindowOpacity((180 - self.frame) / 20)
-            self.frame -= 1
-        elif self.frame > 20:
-            self.frame -= 1
-        elif self.frame > 0:
-            self.gifOpacity.setOpacity(self.frame / 20)
-            self.textOpacity.setOpacity(self.frame / 20)
-            # self.setWindowOpacity(self.frame / 60)
-            self.frame -= 1
-        else:
-            self.frame = 180
-            self.animationTimer.stop()
-            if not self.executeToken:
-                self.gifOpacity.setOpacity(1)
-                self.textOpacity.setOpacity(1)
-                # self.setWindowOpacity(1)
-                self.showText.setText('感谢 DD 投喂的\n100个小心心')
-            else:
-                self.gifOpacity.setOpacity(0)
-                self.textOpacity.setOpacity(0)
-                # self.setWindowOpacity(0)
-                self.showText.setText('')
-            self.finish.emit()
+    def mouseMoveEvent(self, event):
+        self.pointClicked.emit(event.pos())
 
 
 class previewLabel(QLabel):
@@ -217,135 +46,285 @@ class MainWindow(QMainWindow):
         self.executeToken = False
         self.setAcceptDrops(True)
         self.installEventFilter(self)
-        if os.path.exists('config.json'):
-            with codecs.open('config.json', 'r', 'utf_8_sig') as config:
+        self.presetIndex = '0'
+        if os.path.exists('utils/config.json'):
+            with codecs.open('utils/config.json', 'r', 'utf_8_sig') as config:
                 config = config.read()
             self.config = json.loads(config)
         else:
-            self.config = {'room_url': '', 'bgm_path': '', 'gif_path': '', 'font_color': '#000000',
-                           'font_name': '微软雅黑', 'font_size': '10', 'font_bold': '0', 'font_italic': '0',
-                           'guard_text_before': '恭迎', 'guard_text_after': '舰长登船~~', 'filter': '1',
-                           'background_color': '#00d600', 'opacity_color': '0', 'top': '1'}
-        self.opacityColorToken = True if self.config['opacity_color'] == '1' else False
-        self.stayTopToken = True if self.config['top'] == '1' else False
-        self.GIFWidget = GIFWidget(self.config['gif_path'], self.opacityColorToken, self.stayTopToken)
+            self.config = {str(x): {'gift': '请输入礼物名字 多个礼物间用空格隔开', 'words': '感谢 {用户} 投喂的{数量}个{礼物}~',
+                                    'bgm_path': '', 'volume': 100, 'gif_path': '', 'gif_scale': 50,
+                                    'second': 4, 'font_color': '#3c9dca', 'out_color': '#1c54a7', 'out_size': 15,
+                                    'font_name': '微软雅黑', 'font_size': 36, 'font_bold': False, 'font_italic': False
+                                    } for x in range(10)}
+            self.config['0']['gift'] = ('辣条 小心心 “棋”开得胜 盛典门票 盛典之杯 吃瓜 冰阔落 给大佬递茶 打榜 盛典小电视 '
+                                        'B坷垃 天空之翼 摩天大楼 礼花 凉了 比心 喵娘 节奏风暴 疯狂打call 泡泡机 爱之魔力 '
+                                        '摩天轮 转运锦鲤 冲浪 亿圆')
+            self.config['9']['words'] = '恭迎 {用户} 上舰~~~'
+            self.config['room_url'] = '123456'
+            self.config['background_color'] = '#00d600'
+            self.config['opacity'] = False
+            self.config['top'] = False
+        self.gift = self.config['0']['gift']
+        self.second = self.config['0']['second']
+        self.color = self.config['0']['font_color']
+        self.outColor = self.config['0']['out_color']
+        self.outSize = self.config['0']['out_size']
+        self.gifScale = self.config['0']['gif_scale']
+        self.gifSize = None
+        self.volume = self.config['0']['volume']
+        self.oldBGM = self.config['0']['bgm_path']
+
+        self.option = OptionWidget(self.config['background_color'], self.config['opacity'], self.config['top'])
+        self.option.color.connect(self.selectBackgroundColor)
+        self.option.opacity.connect(self.setopacity)
+        self.option.top.connect(self.setTop)
+
+        self.GIFWidget = GIFWidget(self.config['0']['gif_path'], self.config['opacity'],
+                                   self.config['top'], self.second * 60, self.color, self.outColor)
+        self.GIFWidget.showText.w = self.outSize / 250
         self.GIFWidget.setBackgroundColor(self.config['background_color'])
         self.GIFWidget.finish.connect(self.animateFinish)
+        self.GIFWidget.setText(self.config['0']['words'], 'gift')
 
-        self.setWindowTitle('B站直播打赏感谢机 测试版   (by up 执鸣神君)')
+        self.setWindowTitle('DD答谢机 V1.0  (by 执明神君)')
         self.main_widget = QWidget()
         self.main_widget.setAcceptDrops(True)
         self.setCentralWidget(self.main_widget)
         layout = QGridLayout()
         self.main_widget.setLayout(layout)
-        roomIDLabel = QLabel('主播房间地址')
-        roomIDLabel.setAlignment(Qt.AlignCenter)
-        layout.addWidget(roomIDLabel, 0, 0, 1, 1)
+        self.roomIDLabel = QLabel('B站直播房间')
+        self.roomIDLabel.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.roomIDLabel, 0, 0, 1, 1)
+        self.biliLiveLabel = QLabel('https://live.bilibili.com/')
+        layout.addWidget(self.biliLiveLabel, 0, 2, 1, 2)
         self.roomURLEdit = QLineEdit(self.config['room_url'])
-        layout.addWidget(self.roomURLEdit, 0, 2, 1, 5)
+        self.roomURLEdit.setValidator(QIntValidator(0, 2000000000))
+        self.roomURLEdit.textChanged.connect(self.setURL)
+        layout.addWidget(self.roomURLEdit, 0, 4, 1, 3)
 
-        bgmButton = QPushButton('选择答谢音效')
-        bgmButton.clicked.connect(self.selectBGM)
-        layout.addWidget(bgmButton, 1, 0, 1, 1)
-        self.bgmEdit = QLineEdit(self.config['bgm_path'])
-        self.sound.setMedia(QUrl.fromLocalFile(self.config['bgm_path']))
-        layout.addWidget(self.bgmEdit, 1, 2, 1, 5)
+        self.presetCombobox = QComboBox()
+        self.presetCombobox.addItems(['    礼物预设%d' % x for x in range(1, 10)] + ['    舰长上船'])
+        self.presetCombobox.currentIndexChanged.connect(self.changePreset)
+        layout.addWidget(self.presetCombobox, 1, 0, 1, 1)
+        self.giftEdit = QLineEdit(self.gift)
+        self.giftEdit.textChanged.connect(self.changeGift)
+        layout.addWidget(self.giftEdit, 1, 2, 1, 5)
 
-        fontButton = QPushButton('设置字体样式')
-        fontButton.clicked.connect(self.getFont)
-        layout.addWidget(fontButton, 2, 0, 1, 1)
-        self.font = QFont(self.config['font_name'], int(self.config['font_size']))
-        if self.config['font_bold'] == '1':
-            self.font.setBold(True)
-        if self.config['font_italic'] == '1':
-            self.font.setItalic(True)
-        self.color = self.config['font_color']
+        self.defaultWordsButton = QPushButton('重置台词')
+        self.defaultWordsButton.clicked.connect(self.setDefaultWords)
+        layout.addWidget(self.defaultWordsButton, 2, 0, 1, 1)
+        self.wordsEdit = QLineEdit(self.config['0']['words'])
+        self.wordsEdit.textChanged.connect(self.setWords)
+        layout.addWidget(self.wordsEdit, 2, 2, 1, 5)
+
+        self.fontButton = QPushButton('字体设置')
+        self.fontButton.clicked.connect(self.getFont)
+        layout.addWidget(self.fontButton, 3, 0, 1, 1)
         self.fontLabel = QLabel()
-        fontInfo = '%s  %s  %s  ' % (self.config['font_name'], self.config['font_size'], self.config['font_color'])
-        if self.config['font_bold'] == '1':
+        fontInfo = '%s  %s  %s  ' % (self.config['0']['font_name'], self.config['0']['font_size'], self.config['0']['font_color'])
+        self.font = QFont(self.config['0']['font_name'], self.config['0']['font_size'])
+        if self.config['0']['font_bold']:
+            self.font.setBold(self.config['0']['font_bold'])
             fontInfo += '加粗  '
-        if self.config['font_italic'] == '1':
+        if self.config['0']['font_italic']:
+            self.font.setItalic(self.config['0']['font_italic'])
             fontInfo += '斜体'
         self.fontLabel.setText(fontInfo)
         self.fontLabel.setStyleSheet('color:' + self.color)
         self.GIFWidget.setFont(self.font)
         self.GIFWidget.setColor(self.color)
-        layout.addWidget(self.fontLabel, 2, 2, 1, 5)
+        layout.addWidget(self.fontLabel, 3, 2, 1, 5)
 
-        guardLabel = QLabel('舰长专属贺词')
-        guardLabel.setAlignment(Qt.AlignCenter)
-        layout.addWidget(guardLabel, 3, 0, 1, 1)
-        self.guardEditBefore = QLineEdit(self.config['guard_text_before'])
-        layout.addWidget(self.guardEditBefore, 3, 2, 1, 2)
-        guardNameLabel = QLabel('舰长名')
-        guardNameLabel.setAlignment(Qt.AlignCenter)
-        layout.addWidget(guardNameLabel, 3, 4, 1, 1)
-        self.guardEditAfter = QLineEdit(self.config['guard_text_after'])
-        layout.addWidget(self.guardEditAfter, 3, 5, 1, 2)
+        self.outLineButton = QPushButton('描边颜色')
+        self.outLineButton.clicked.connect(self.setOutLine)
+        layout.addWidget(self.outLineButton, 4, 0, 1, 1)
+        self.outLineLabel = QLabel(self.outColor)
+        self.outLineLabel.setStyleSheet('color:' + self.outColor)
+        layout.addWidget(self.outLineLabel, 4, 2, 1, 1)
+        self.outLineSizeLabel = QLabel('粗细')
+        self.outLineSizeLabel.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.outLineSizeLabel, 4, 4, 1, 1)
+        self.outLineSizeBar = Slider()
+        self.outLineSizeBar.setMaximum(100)
+        self.outLineSizeBar.setValue(self.outSize)
+        self.outLineSizeBar.pointClicked.connect(self.sizeChange)
+        layout.addWidget(self.outLineSizeBar, 4, 5, 1, 2)
 
-        self.filterToken = True if self.config['filter'] == '1' else False
-        if self.filterToken:
-            self.filterButton = QPushButton('过滤银币礼物')
-            self.filterButton.setStyleSheet('background-color:#3daee9')
-        else:
-            self.filterButton = QPushButton('显示所有礼物')
-            self.filterButton.setStyleSheet('background-color:#31363b')
-        self.filterButton.clicked.connect(self.changeFilter)
-        layout.addWidget(self.filterButton, 4, 0, 1, 1)
+        self.bgmButton = QPushButton('音效设置')
+        self.bgmButton.clicked.connect(self.selectBGM)
+        layout.addWidget(self.bgmButton, 5, 0, 1, 1)
+        self.bgmEdit = QLabel(os.path.split(self.config['0']['bgm_path'])[1])
+        self.sound.setMedia(QUrl.fromLocalFile(self.config['0']['bgm_path']))
+        layout.addWidget(self.bgmEdit, 5, 2, 1, 2)
+        self.volumeLabel = QLabel('音量')
+        self.volumeLabel.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.volumeLabel, 5, 4, 1, 1)
+        self.volumeBar = Slider()
+        self.volumeBar.setMaximum(100)
+        self.volumeBar.setValue(self.volume)
+        self.volumeBar.pointClicked.connect(self.changevolume)
+        layout.addWidget(self.volumeBar, 5, 5, 1, 2)
 
-        backgroundColorButton = QPushButton('背景颜色')
-        backgroundColorButton.clicked.connect(self.selectBackgroundColor)
-        layout.addWidget(backgroundColorButton, 4, 2, 1, 1)
-        self.backgroundColorLabel = QLabel(self.config['background_color'])
-        self.backgroundColorLabel.setStyleSheet('color:%s' % self.config['background_color'])
-        layout.addWidget(self.backgroundColorLabel, 4, 3, 1, 1)
+        self.animeSecond = QLabel('持续时间')
+        self.animeSecond.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.animeSecond, 6, 0, 1, 1)
+        self.animeSecondComboBox = QComboBox()
+        self.animeSecondComboBox.addItems([str(i) + '秒' for i in range(1, 31)])
+        self.animeSecondComboBox.setCurrentIndex(self.second - 1)
+        self.animeSecondComboBox.currentIndexChanged.connect(self.setSecond)
+        layout.addWidget(self.animeSecondComboBox, 6, 2, 1, 2)
 
+        self.scaledValue = QLabel('大小')
+        self.scaledValue.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.scaledValue, 6, 4, 1, 1)
+        self.scaledBar = Slider()
+        self.scaledBar.setValue(self.gifScale)
+        self.scaledBar.pointClicked.connect(self.scaleChange)
+        layout.addWidget(self.scaledBar, 6, 5, 1, 2)
 
-        self.stayTopButton = QPushButton('特效窗口置顶 (重启生效)')
-        self.stayTopButton.clicked.connect(self.setTop)
-        if self.stayTopToken:
-            self.stayTopButton.setStyleSheet('background-color:#3daee9')
-        else:
-            self.stayTopButton.setStyleSheet('background-color:#31363b')
-        layout.addWidget(self.stayTopButton, 5, 0, 1, 2)
-
-        self.opacityColorButton = QPushButton('透明背景 (重启生效)')
-        self.opacityColorButton.clicked.connect(self.setOpacityColor)
-        if self.opacityColorToken:
-            self.opacityColorButton.setStyleSheet('background-color:#3daee9')
-        else:
-            self.opacityColorButton.setStyleSheet('background-color:#31363b')
-        layout.addWidget(self.opacityColorButton, 4, 5, 1, 2)
+        self.advancedButton = QPushButton('高级设置')
+        self.advancedButton.clicked.connect(self.popOption)
+        layout.addWidget(self.advancedButton, 7, 0, 1, 1)
 
         self.preview = previewLabel('点击或拖入要播放的答谢gif动图')
+        self.preview.setMaximumSize(520, 400)
         self.preview.click.connect(self.click)
-        if self.config['gif_path']:
-            movie = QMovie(self.config['gif_path'])
-            self.preview.setMovie(movie)
-            movie.start()
-        layout.addWidget(self.preview, 6, 0, 5, 7)
+        if self.config['0']['gif_path']:
+            pixmap = QPixmap(self.config['0']['gif_path'])
+            self.gifSize = pixmap.size()
+            self.movie = QMovie(self.config['0']['gif_path'])
+            self.preview.setMovie(self.movie)
+            self.movie.setScaledSize(self.gifSize * self.gifScale / 50)
+            self.GIFWidget.movie.setScaledSize(self.gifSize * self.gifScale / 50)
+            self.movie.start()
+        layout.addWidget(self.preview, 8, 0, 4, 7)
 
-        self.testButton = QPushButton('测试一下')
+        self.testButton = QPushButton('预览效果')
         self.testButton.clicked.connect(self.testAnimate)
-        self.testButton.setFixedSize(200, 65)
-        layout.addWidget(self.testButton, 11, 0, 2, 3)
+        self.testButton.setFixedSize(205, 65)
+        layout.addWidget(self.testButton, 12, 0, 2, 3)
+
         self.startButton = QPushButton('开始捕获')
         self.startButton.clicked.connect(self.startMonitor)
-        self.startButton.setFixedSize(200, 65)
-        layout.addWidget(self.startButton, 11, 4, 2, 3)
+        self.startButton.setFixedSize(205, 65)
+        layout.addWidget(self.startButton, 12, 4, 2, 3)
 
-    def changeFilter(self):
-        if self.filterToken:
-            self.filterButton.setText('显示所有礼物')
-            self.filterButton.setStyleSheet('background-color:#31363b')
+        self.resizeTimer = QTimer()
+        self.resizeTimer.setInterval(16)
+        self.resizeTimer.timeout.connect(self.resizeGIFWidget)
+        self.resizeTimer.start()
+
+        self.widgetsList = [self.roomURLEdit, self.presetCombobox, self.giftEdit, self.defaultWordsButton,
+                            self.wordsEdit, self.fontButton, self.outLineButton, self.outLineSizeBar,
+                            self.bgmButton, self.volumeBar, self.animeSecondComboBox, self.scaledBar,
+                            self.advancedButton, self.preview, self.testButton, self.outLineSizeLabel,
+                            self.volumeLabel, self.scaledValue, self.animeSecond, self.bgmEdit,
+                            self.roomIDLabel, self.biliLiveLabel, self.fontLabel, self.outLineLabel]
+
+    def resizeGIFWidget(self):
+        self.GIFWidget.resize(300, 200)
+        self.resize(540, 500)
+
+    def changePreset(self, index):
+        if index == 9:
+            self.giftEdit.setEnabled(False)
         else:
-            self.filterButton.setText('过滤银币礼物')
-            self.filterButton.setStyleSheet('background-color:#3daee9')
-        self.filterToken = not self.filterToken
-        try:
-            self.remoteThread.setFilter(self.filterToken)
-        except:
-            pass
+            self.giftEdit.setEnabled(True)
+        self.presetIndex = str(index)
+        self.gift = self.config[self.presetIndex]['gift']
+        self.giftEdit.setText(self.gift)
+
+        self.wordsEdit.setText(self.config[self.presetIndex]['words'])
+
+
+        self.second = self.config[self.presetIndex]['second']
+        self.animeSecondComboBox.setCurrentIndex(self.second - 1)
+        self.GIFWidget.setSecond(self.second)
+        self.color = self.config[self.presetIndex]['font_color']
+
+        fontInfo = '%s  %s  %s  ' % (self.config[self.presetIndex]['font_name'],
+                                     self.config[self.presetIndex]['font_size'],
+                                     self.config[self.presetIndex]['font_color'])
+        self.font = QFont(self.config[self.presetIndex]['font_name'],
+                          self.config[self.presetIndex]['font_size'])
+        if self.config[self.presetIndex]['font_bold']:
+            self.font.setBold(self.config[self.presetIndex]['font_bold'])
+            fontInfo += '加粗  '
+        if self.config[self.presetIndex]['font_italic']:
+            self.font.setItalic(self.config[self.presetIndex]['font_italic'])
+            fontInfo += '斜体'
+        self.fontLabel.setText(fontInfo)
+        self.fontLabel.setStyleSheet('color:' + self.color)
+        self.GIFWidget.setFont(self.font)
+        self.GIFWidget.showText.setBrush(QColor(self.color))
+
+        self.outColor = self.config[self.presetIndex]['out_color']
+
+        self.config[self.presetIndex]['out_color'] = self.outColor
+        self.GIFWidget.showText.setPen(self.outColor)
+        self.GIFWidget.showText.repaint()
+        self.outLineLabel.setText(self.outColor)
+        self.outLineLabel.setStyleSheet('color:' + self.outColor)
+
+        self.outSize = self.config[self.presetIndex]['out_size']
+
+        self.outLineSizeBar.setValue(self.outSize)
+        self.config[self.presetIndex]['out_size'] = self.outSize
+        self.GIFWidget.showText.w = self.outSize / 250
+        self.GIFWidget.showText.repaint()
+
+        self.preview.clear()
+        self.GIFWidget.showGIF.clear()
+        self.preview.setText('点击或拖入要播放的答谢gif动图')
+        if self.config[self.presetIndex]['gif_path']:
+            pixmap = QPixmap(self.config[self.presetIndex]['gif_path'])
+            self.gifSize = pixmap.size()
+            self.movie = QMovie(self.config[self.presetIndex]['gif_path'])
+            self.movie.setScaledSize(self.gifSize * self.gifScale / 50)
+            self.preview.setMovie(self.movie)
+            self.movie.start()
+            self.GIFWidget.movie = QMovie(self.config[self.presetIndex]['gif_path'])
+            self.GIFWidget.movie.setScaledSize(self.gifSize * self.gifScale / 50)
+            self.GIFWidget.showGIF.setMovie(self.GIFWidget.movie)
+            self.GIFWidget.movie.start()
+
+        pos = self.config[self.presetIndex]['gif_scale']
+        self.scaledBar.setValue(pos)
+        scale = pos / 50
+        if self.gifSize:
+            self.movie.setScaledSize(self.gifSize * scale)
+            self.GIFWidget.movie.setScaledSize(self.gifSize * scale)
+
+        self.bgmEdit.setText(os.path.split(self.config[self.presetIndex]['bgm_path'])[1])
+        self.sound.setMedia(QUrl.fromLocalFile(self.config[self.presetIndex]['bgm_path']))
+
+        self.volume = self.config[self.presetIndex]['volume']
+        self.volumeBar.setValue(self.volume)
+        self.sound.setVolume(self.volume)
+
+    def setURL(self, text):
+        self.config['room_url'] = text
+
+    def setWords(self, text):
+        if self.presetIndex == '9':
+            self.GIFWidget.setText(text, 'captain')
+        else:
+            self.GIFWidget.setText(text, 'gift')
+        self.config[self.presetIndex]['words'] = text
+
+    def setDefaultWords(self):
+        if self.presetIndex == '9':
+            text = '恭迎 {用户} 上舰~~~'
+            self.GIFWidget.setText(text, 'captain')
+        else:
+            text = '感谢 {用户} 投喂的{数量}个{礼物}~'
+            self.GIFWidget.setText(text, 'gift')
+        self.wordsEdit.setText(text)
+        self.config[self.presetIndex]['words'] = text
+
+    def changeGift(self):
+        self.config[self.presetIndex]['gift'] = self.giftEdit.text()
 
     def selectBGM(self):
         if not os.path.exists('bgm'):
@@ -355,67 +334,96 @@ class MainWindow(QMainWindow):
             fileName = os.path.split(filePath)[1]
             if not os.path.exists(r'bgm/%s' % fileName):
                 shutil.copy(filePath, 'bgm')
-            self.bgmEdit.setText(filePath)
+            self.bgmEdit.setText(os.path.split(filePath)[1])
             self.sound.setMedia(QUrl.fromLocalFile(filePath))
+            self.config[self.presetIndex]['bgm_path'] = filePath
 
-    def selectBackgroundColor(self):
-        color = QColorDialog.getColor(self.config['background_color'])
-        if color.isValid():
-            color = color.name()
-            self.config['background_color'] = color
-            self.backgroundColorLabel.setText(color)
-            self.backgroundColorLabel.setStyleSheet('color:%s' % color)
-            self.GIFWidget.setBackgroundColor(color)
+    def changevolume(self, p):
+        pos = p.x() / self.volumeBar.width() * 100
+        if pos > 100:
+            pos = 100
+        elif pos < 0:
+            pos = 0
+        self.volumeBar.setValue(pos)
+        self.volume = pos
+        self.sound.setVolume(pos)
+        self.config[self.presetIndex]['volume'] = pos
 
-    def setTop(self):
-        self.stayTopToken = not self.stayTopToken
-        if self.stayTopToken:
-            self.stayTopButton.setStyleSheet('background-color:#3daee9')
-        else:
-            self.stayTopButton.setStyleSheet('background-color:#31363b')
-        self.config['top'] = '1' if self.stayTopToken else '0'
+    def selectBackgroundColor(self, color):
+        self.config['background_color'] = color
+        self.GIFWidget.setBackgroundColor(color)
 
-    def setOpacityColor(self):
-        self.opacityColorToken = not self.opacityColorToken
-        if self.opacityColorToken:
-            self.opacityColorButton.setStyleSheet('background-color:#3daee9')
-        else:
-            self.opacityColorButton.setStyleSheet('background-color:#31363b')
-        self.config['opacity_color'] = '1' if self.opacityColorToken else '0'
+    def setTop(self, topToken):
+        self.config['top'] = topToken
+
+    def setopacity(self, opacityToken):
+        self.config['opacity'] = opacityToken
+
+    def setSecond(self, index):
+        self.second = index + 1
+        self.GIFWidget.setSecond(self.second)
+        self.config[self.presetIndex]['second'] = self.second
+
+    def scaleChange(self, p):
+        pos = p.x() / self.scaledBar.width() * 100
+        if pos > 100:
+            pos = 100
+        elif pos < 1:
+            pos = 1
+        self.scaledBar.setValue(pos)
+        self.config[self.presetIndex]['gif_scale'] = pos
+        scale = pos / 50
+        if self.gifSize:
+            self.movie.setScaledSize(self.gifSize * scale)
+            self.GIFWidget.movie.setScaledSize(self.gifSize * scale)
+
+    def sizeChange(self, p):
+        self.outSize = p.x() / self.outLineSizeBar.width() * 100
+        if self.outSize > 100:
+            self.outSize = 100
+        elif self.outSize < 1:
+            self.outSize = 1
+        self.outLineSizeBar.setValue(self.outSize)
+        self.config[self.presetIndex]['out_size'] = self.outSize
+        self.GIFWidget.showText.w = self.outSize / 400
+        self.GIFWidget.showText.repaint()
 
     def click(self):
-        filePath = QFileDialog.getOpenFileName(self, "请选择gif文件", 'gif', "*.gif")[0]
+        filePath = QFileDialog.getOpenFileName(self, "请选择gif文件", 'gif', "*.gif;;所有文件 *.*")[0]
         if filePath:
             self.openFile(filePath)
+        else:
+            self.preview.clear()
+            self.GIFWidget.showGIF.clear()
+            self.preview.setText('点击或拖入要播放的答谢gif动图')
+            self.config[self.presetIndex]['gif_path'] = ''
 
     def openFile(self, filePath):
-        if filePath.endswith('.gif'):
-            fileName = os.path.split(filePath)[1]
-            if not os.path.exists('gif'):
-                os.mkdir('gif')
-            if not os.path.exists(r'gif/%s' % fileName):
-                shutil.copy(filePath, 'gif')
-            movie = QMovie(filePath)
-            self.preview.setMovie(movie)
-            movie.start()
-            self.GIFWidget.setGIFPath(filePath)
-            self.config['gif_path'] = r'%s/gif/%s' % (os.getcwd(), fileName)
+        fileName = os.path.split(filePath)[1]
+        if not os.path.exists('gif'):
+            os.mkdir('gif')
+        if not os.path.exists(r'gif/%s' % fileName):
+            shutil.copy(filePath, 'gif')
+        pixmap = QPixmap(filePath)
+        self.gifSize = pixmap.size()
+        self.movie = QMovie(filePath)
+        self.preview.setMovie(self.movie)
+        self.movie.start()
+        self.GIFWidget.setGIFPath(filePath)
+        self.config[self.presetIndex]['gif_path'] = r'%s/gif/%s' % (os.getcwd(), fileName)
+        self.scaledBar.setValue(50)
 
     def dragEnterEvent(self, QDragEnterEvent):
         QDragEnterEvent.accept()
 
     def dropEvent(self, QEvent):
         if QEvent.mimeData().hasUrls:
-            self.openFile(QEvent.mimeData().urls()[0].toLocalFile())
+            self.openFile(QEvent.mimeData().urls()['0'].toLocalFile())
 
     def closeEvent(self, QCloseEvent):
         self.GIFWidget.close()
-        self.config['room_url'] = self.roomURLEdit.text()
-        self.config['bgm_path'] = self.bgmEdit.text()
-        self.config['guard_text_before'] = self.guardEditBefore.text()
-        self.config['guard_text_after'] = self.guardEditAfter.text()
-        self.config['filter'] = '1' if self.filterToken else '0'
-        with codecs.open('config.json', 'w', 'utf_8_sig') as config:
+        self.option.close()
+        with codecs.open('utils/config.json', 'w', 'utf_8_sig') as config:
             config.write(json.dumps(self.config, ensure_ascii=False))
 
     def getFont(self):
@@ -431,81 +439,126 @@ class MainWindow(QMainWindow):
                 self.font.setBold(True)
             if fontItalic:
                 self.font.setItalic(True)
-            self.config['font_name'] = fontName
-            self.config['font_size'] = fontSize
-            self.config['font_bold'] = '1' if fontBold else '0'
-            self.config['font_italic'] = '1' if fontItalic else '0'
+            self.config[self.presetIndex]['font_name'] = fontName
+            self.config[self.presetIndex]['font_size'] = fontSize
+            self.config[self.presetIndex]['font_bold'] = fontBold
+            self.config[self.presetIndex]['font_italic'] = fontItalic
             self.GIFWidget.setFont(self.font)
+            fontInfo = '%s  %s  %s  ' % (self.config[self.presetIndex]['font_name'],
+                                         self.config[self.presetIndex]['font_size'],
+                                         self.config[self.presetIndex]['font_color'])
+            if fontBold:
+                fontInfo += '加粗  '
+            if fontItalic:
+                fontInfo += '斜体'
+            self.fontLabel.setText(fontInfo)
+            self.fontLabel.setStyleSheet('color:' + self.color)
         color = QColorDialog.getColor(self.color)
         if color.isValid():
             self.color = color.name()
-            self.config['font_color'] = self.color
-            self.GIFWidget.setColor(self.color)
-        fontInfo = '%s  %s  %s  ' % (self.config['font_name'], self.config['font_size'], self.config['font_color'])
-        if self.config['font_bold'] == '1':
-            fontInfo += '加粗  '
-        if self.config['font_italic'] == '1':
-            fontInfo += '斜体'
-        self.fontLabel.setText(fontInfo)
-        self.fontLabel.setStyleSheet('color:' + self.color)
+            self.config[self.presetIndex]['font_color'] = self.color
+            self.GIFWidget.showText.setBrush(QColor(self.color))
+            self.GIFWidget.showText.repaint()
+
+    def setOutLine(self):
+        color = QColorDialog().getColor(self.outColor)
+        if color.isValid():
+            self.outColor = color.name()
+            self.config[self.presetIndex]['out_color'] = self.outColor
+            self.GIFWidget.showText.setPen(self.outColor)
+            self.GIFWidget.showText.repaint()
+            self.outLineLabel.setText(self.outColor)
+            self.outLineLabel.setStyleSheet('color:' + self.outColor)
+
+    def setConfig(self, config, mode):
+        self.GIFWidget.setText(config['words'], mode)
+        self.GIFWidget.movie = QMovie(config['gif_path'])
+        self.gifSize = QPixmap(config['gif_path']).size()
+        if self.gifSize:
+            self.GIFWidget.movie.setScaledSize(self.gifSize * config['gif_scale'] / 50)
+        self.GIFWidget.showGIF.setMovie(self.GIFWidget.movie)
+        self.GIFWidget.movie.start()
+        self.GIFWidget.setSecond(config['second'])
+        self.GIFWidget.showText.setBrush(QColor(config['font_color']))
+        self.GIFWidget.showText.setPen(config['out_color'])
+        self.GIFWidget.showText.w = config['out_size'] / 400
+        self.GIFWidget.showText.repaint()
+        font = QFont(config['font_name'], config['font_size'])
+        if config['font_bold']:
+            font.setBold(True)
+        if config['font_italic']:
+            font.setItalic(True)
+        self.GIFWidget.setFont(font)
 
     def testAnimate(self):
         if self.bgmEdit.text():
+            self.sound.stop()
             self.sound.play()
+        self.GIFWidget.frame = self.second * 60
         self.GIFWidget.animationTimer.start()
 
     def playAnimate(self, giftInfo):
-        if self.bgmEdit.text():
+        uid, num, gift = giftInfo
+        self.GIFWidget.ID = uid
+        self.GIFWidget.number = str(num)
+        self.GIFWidget.gift = gift
+        if gift == 'captain':
+            self.setConfig(self.config['9'], 'captain')
+            self.GIFWidget.animationTimer.start()
+            presetIndex = '9'
+        else:
+            for presetIndex in [str(x) for x in range(9)]:
+                if gift in self.config[presetIndex]['gift']:
+                    self.setConfig(self.config[presetIndex], 'gift')
+                    self.GIFWidget.animationTimer.start()
+                    break
+        bgm = self.config[presetIndex]['bgm_path']
+        if bgm:
+            if bgm != self.oldBGM:
+                self.oldBGM = bgm
+                self.sound.setMedia(QUrl.fromLocalFile(self.config[presetIndex]['bgm_path']))
+            self.sound.setVolume(self.config[presetIndex]['volume'])
             self.sound.play()
-        self.GIFWidget.setGiftInfo(giftInfo)
-        self.GIFWidget.frame = 180
-        self.GIFWidget.animationTimer.start()
 
-    def playGuardAnimate(self, guardName):
-        if self.bgmEdit.text():
-            self.sound.play()
-        guardTextBefore = self.guardEditBefore.text()
-        guardTextAfter = self.guardEditAfter.text()
-        if not guardTextBefore and not guardTextAfter:
-            guardTextBefore = '恭迎'
-            guardTextAfter = '舰长登船~~'
-            self.guardEditBefore.setText(guardTextBefore)
-            self.guardEditAfter.setText(guardTextAfter)
-        self.GIFWidget.setGuard([guardTextBefore, guardName, guardTextAfter])
-        self.GIFWidget.frame = 180
-        self.GIFWidget.animationTimer.start()
+    def popOption(self):
+        self.option.hide()
+        self.option.show()
 
     def animateFinish(self):
         self.sound.stop()
 
     def startMonitor(self):
         if not self.executeToken:
-            self.remoteThread = remoteThread(self.roomURLEdit.text())
+            self.remoteThread = remoteThread(self.config['room_url'])
             self.remoteThread.giftInfo.connect(self.playAnimate)
-            self.remoteThread.guard.connect(self.playGuardAnimate)
-            self.remoteThread.setFilter(self.filterToken)
             self.remoteThread.start()
+            for widget in self.widgetsList:
+                widget.setEnabled(False)
             self.executeToken = True
             self.GIFWidget.executeToken = True
             self.GIFWidget.gifOpacity.setOpacity(0)
             self.GIFWidget.textOpacity.setOpacity(0)
-            # self.GIFWidget.setWindowOpacity(0)
-            self.testButton.setEnabled(False)
             self.startButton.setStyleSheet('background-color:#3daee9')
             self.startButton.setText('停止捕获')
         else:
+            self.sound.stop()
+            self.GIFWidget.animationTimer.stop()
             self.remoteThread.terminate()
             self.remoteThread.quit()
             self.remoteThread.wait()
+            for widget in self.widgetsList:
+                widget.setEnabled(True)
             self.executeToken = False
             self.GIFWidget.executeToken = False
             self.GIFWidget.gifOpacity.setOpacity(1)
             self.GIFWidget.textOpacity.setOpacity(1)
-            # self.GIFWidget.setWindowOpacity(1)
-            self.testButton.setEnabled(True)
             self.startButton.setStyleSheet('background-color:#31363b')
             self.startButton.setText('开始捕获')
-            self.GIFWidget.showText.setText('感谢 DD 投喂的\n100个小心心')
+            text = self.wordsEdit.text()
+            if self.presetIndex == '9':
+                self.GIFWidget.setText(text, 'captain', True)
+            else:
+                self.GIFWidget.setText(text, 'gift', True)
 
 
 if __name__ == '__main__':
@@ -520,7 +573,7 @@ if __name__ == '__main__':
     app.setFont(QFont('微软雅黑', 9))
     mainWindow = MainWindow()
     screen = app.primaryScreen().geometry()
-    w, h = 500, 500
+    w, h = 540, 500
     mainWindow.resize(w, h)
     mainWindow.move((screen.width() - w) / 2 - 300, (screen.height() - h) / 2)
     mainWindow.show()
