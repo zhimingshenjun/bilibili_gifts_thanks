@@ -87,7 +87,7 @@ class OutlinedLabel(QLabel):
 class GIFWidget(QWidget):
     finish = Signal()
 
-    def __init__(self, gifPath='', opacity=False, top=True, frame=180,
+    def __init__(self, qmovie, opacity=False, top=True, frame=180,
                  fontColor='#000000', outColor='#FFFFFF', parent=None):
         super().__init__(parent)
         self.mousePressToken = False
@@ -118,10 +118,11 @@ class GIFWidget(QWidget):
         self.showGIF.setAttribute(Qt.WA_TranslucentBackground)
         self.showGIF.setAlignment(Qt.AlignCenter)
         self.layout.addWidget(self.showGIF, 0, 0, 1, 1)
-        if gifPath:
-            self.movie = QMovie(gifPath)
-            self.showGIF.setMovie(self.movie)
-            self.movie.start()
+        # if gifPath:
+        #     self.movie = QMovie(gifPath)
+        #     self.showGIF.setMovie(self.movie)
+        #     self.movie.start()
+        self.showGIF.setMovie(qmovie)
         self.gifOpacity = QGraphicsOpacityEffect()
         self.showGIF.setGraphicsEffect(self.gifOpacity)
         self.gifOpacity.setOpacity(1)

@@ -74,13 +74,21 @@ class MainWindow(QMainWindow):
         self.gifSize = None
         self.volume = self.config['0']['volume']
         self.oldBGM = self.config['0']['bgm_path']
-
+        self.movieList = []
+        self.gifSizeList = []
+        for index in [str(i) for i in range(10)]:
+            movie = QMovie(self.config[index]['gif_path'])
+            gifSize = QPixmap(self.config[index]['gif_path']).size()
+            if gifSize:
+                movie.setScaledSize(gifSize * self.config[index]['gif_scale'] / 50)
+            self.movieList.append(movie)
+            self.gifSizeList.append(gifSize)
         self.option = OptionWidget(self.config['background_color'], self.config['opacity'], self.config['top'])
         self.option.color.connect(self.selectBackgroundColor)
         self.option.opacity.connect(self.setopacity)
         self.option.top.connect(self.setTop)
 
-        self.GIFWidget = GIFWidget(self.config['0']['gif_path'], self.config['opacity'],
+        self.GIFWidget = GIFWidget(self.movieList[0], self.config['opacity'],
                                    self.config['top'], self.second * 60, self.color, self.outColor)
         self.GIFWidget.showText.w = self.outSize / 250
         self.GIFWidget.setBackgroundColor(self.config['background_color'])
@@ -188,15 +196,16 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.advancedButton, 7, 0, 1, 1)
 
         self.preview = previewLabel('点击或拖入要播放的答谢gif动图')
-        self.preview.setMaximumSize(520, 400)
+        self.preview.setFrameShape(QFrame.Box)
+        self.preview.setStyleSheet('border:2px dotted #cfcfd0')
+        self.preview.setMaximumSize(522, 400)
         self.preview.click.connect(self.click)
         if self.config['0']['gif_path']:
-            pixmap = QPixmap(self.config['0']['gif_path'])
-            self.gifSize = pixmap.size()
-            self.movie = QMovie(self.config['0']['gif_path'])
-            self.preview.setMovie(self.movie)
+            self.gifSize = self.gifSizeList[0]
+            self.movie = self.movieList[0]
             self.movie.setScaledSize(self.gifSize * self.gifScale / 50)
-            self.GIFWidget.movie.setScaledSize(self.gifSize * self.gifScale / 50)
+            self.preview.setMovie(self.movie)
+            # self.GIFWidget.movie.setScaledSize(self.gifSize * self.gifScale / 50)
             self.movie.start()
         layout.addWidget(self.preview, 8, 0, 4, 7)
 
@@ -234,9 +243,7 @@ class MainWindow(QMainWindow):
         self.presetIndex = str(index)
         self.gift = self.config[self.presetIndex]['gift']
         self.giftEdit.setText(self.gift)
-
         self.wordsEdit.setText(self.config[self.presetIndex]['words'])
-
 
         self.second = self.config[self.presetIndex]['second']
         self.animeSecondComboBox.setCurrentIndex(self.second - 1)
@@ -278,23 +285,15 @@ class MainWindow(QMainWindow):
         self.GIFWidget.showGIF.clear()
         self.preview.setText('点击或拖入要播放的答谢gif动图')
         if self.config[self.presetIndex]['gif_path']:
-            pixmap = QPixmap(self.config[self.presetIndex]['gif_path'])
-            self.gifSize = pixmap.size()
-            self.movie = QMovie(self.config[self.presetIndex]['gif_path'])
-            self.movie.setScaledSize(self.gifSize * self.gifScale / 50)
+            self.movie = self.movieList[index]
+            self.gifSize = self.gifSizeList[index]
+            pos = self.config[self.presetIndex]['gif_scale']
+            self.scaledBar.setValue(pos)
+            if self.gifSize:
+                self.movie.setScaledSize(self.gifSize * pos / 50)
             self.preview.setMovie(self.movie)
+            self.GIFWidget.showGIF.setMovie(self.movie)
             self.movie.start()
-            self.GIFWidget.movie = QMovie(self.config[self.presetIndex]['gif_path'])
-            self.GIFWidget.movie.setScaledSize(self.gifSize * self.gifScale / 50)
-            self.GIFWidget.showGIF.setMovie(self.GIFWidget.movie)
-            self.GIFWidget.movie.start()
-
-        pos = self.config[self.presetIndex]['gif_scale']
-        self.scaledBar.setValue(pos)
-        scale = pos / 50
-        if self.gifSize:
-            self.movie.setScaledSize(self.gifSize * scale)
-            self.GIFWidget.movie.setScaledSize(self.gifSize * scale)
 
         self.bgmEdit.setText(os.path.split(self.config[self.presetIndex]['bgm_path'])[1])
         self.sound.setMedia(QUrl.fromLocalFile(self.config[self.presetIndex]['bgm_path']))
@@ -375,7 +374,7 @@ class MainWindow(QMainWindow):
         scale = pos / 50
         if self.gifSize:
             self.movie.setScaledSize(self.gifSize * scale)
-            self.GIFWidget.movie.setScaledSize(self.gifSize * scale)
+            # self.GIFWidget.movie.setScaledSize(self.gifSize * scale)
 
     def sizeChange(self, p):
         self.outSize = p.x() / self.outLineSizeBar.width() * 100
@@ -404,12 +403,14 @@ class MainWindow(QMainWindow):
             os.mkdir('gif')
         if not os.path.exists(r'gif/%s' % fileName):
             shutil.copy(filePath, 'gif')
-        pixmap = QPixmap(filePath)
-        self.gifSize = pixmap.size()
-        self.movie = QMovie(filePath)
+        self.gifSize = QPixmap(filePath).size()
+        index = self.presetCombobox.currentIndex()
+        self.movieList[index] = QMovie(filePath)
+        self.movie = self.movieList[index]
         self.preview.setMovie(self.movie)
+        self.GIFWidget.showGIF.setMovie(self.movie)
         self.movie.start()
-        self.GIFWidget.setGIFPath(filePath)
+        # self.GIFWidget.setGIFPath(filePath)
         self.config[self.presetIndex]['gif_path'] = r'%s/gif/%s' % (os.getcwd(), fileName)
         self.scaledBar.setValue(50)
 
@@ -470,14 +471,28 @@ class MainWindow(QMainWindow):
             self.outLineLabel.setText(self.outColor)
             self.outLineLabel.setStyleSheet('color:' + self.outColor)
 
-    def setConfig(self, config, mode):
+    def setConfig(self, config, mode, index):
         self.GIFWidget.setText(config['words'], mode)
-        self.GIFWidget.movie = QMovie(config['gif_path'])
-        self.gifSize = QPixmap(config['gif_path']).size()
-        if self.gifSize:
-            self.GIFWidget.movie.setScaledSize(self.gifSize * config['gif_scale'] / 50)
-        self.GIFWidget.showGIF.setMovie(self.GIFWidget.movie)
-        self.GIFWidget.movie.start()
+
+        # self.movie = self.movieList[index]
+        # self.gifSize = self.gifSizeList[index]
+        # if self.gifSize:
+        #     self.movie.setScaledSize(self.gifSize * config['gif_scale'] / 50)
+        # self.GIFWidget.showGIF.setMovie(self.movie)
+        # self.movie.start()
+
+        self.GIFWidget.showGIF.clear()
+        movie = self.movieList[index]
+        gifSize = self.gifSizeList[index]
+        if gifSize:
+            movie.setScaledSize(gifSize * config['gif_scale'] / 50)
+        self.GIFWidget.showGIF.setMovie(movie)
+        # self.GIFWidget.movie = QMovie(config['gif_path'])
+        # self.gifSize = QPixmap(config['gif_path']).size()
+        # if self.gifSize:
+        #     self.GIFWidget.movie.setScaledSize(self.gifSize * config['gif_scale'] / 50)
+        # self.GIFWidget.showGIF.setMovie(self.GIFWidget.movie)
+        # self.GIFWidget.movie.start()
         self.GIFWidget.setSecond(config['second'])
         self.GIFWidget.showText.setBrush(QColor(config['font_color']))
         self.GIFWidget.showText.setPen(config['out_color'])
@@ -503,20 +518,20 @@ class MainWindow(QMainWindow):
         self.GIFWidget.number = str(num)
         self.GIFWidget.gift = gift
         if gift == 'captain':
-            self.setConfig(self.config['9'], 'captain')
+            self.setConfig(self.config['9'], 'captain', 9)
             self.GIFWidget.animationTimer.start()
             presetIndex = '9'
         else:
             for presetIndex in [str(x) for x in range(9)]:
                 if gift in self.config[presetIndex]['gift']:
-                    self.setConfig(self.config[presetIndex], 'gift')
+                    self.setConfig(self.config[presetIndex], 'gift', int(presetIndex))
                     self.GIFWidget.animationTimer.start()
                     break
         bgm = self.config[presetIndex]['bgm_path']
         if bgm:
-            if bgm != self.oldBGM:
-                self.oldBGM = bgm
-                self.sound.setMedia(QUrl.fromLocalFile(self.config[presetIndex]['bgm_path']))
+            # if bgm != self.oldBGM:
+            #     self.oldBGM = bgm
+            self.sound.setMedia(QUrl.fromLocalFile(bgm))
             self.sound.setVolume(self.config[presetIndex]['volume'])
             self.sound.play()
 
@@ -543,6 +558,10 @@ class MainWindow(QMainWindow):
         else:
             self.sound.stop()
             self.GIFWidget.animationTimer.stop()
+
+            self.GIFWidget.showGIF.clear()
+            self.GIFWidget.showGIF.setMovie(self.movie)
+
             self.remoteThread.terminate()
             self.remoteThread.quit()
             self.remoteThread.wait()
