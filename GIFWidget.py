@@ -86,6 +86,7 @@ class OutlinedLabel(QLabel):
 
 class GIFWidget(QWidget):
     finish = Signal()
+    moveDelta = Signal(QPoint)
 
     def __init__(self, qmovie, opacity=False, top=True, frame=180,
                  fontColor='#000000', outColor='#FFFFFF', parent=None):
@@ -199,11 +200,16 @@ class GIFWidget(QWidget):
     def mouseMoveEvent(self, QEvent):
         if self.mousePressToken:
             self.move(self.pos() + (QEvent.pos() - self.startPos))
+            self.moveDelta.emit(QEvent.pos() - self.startPos)
 
     def playAnimate(self):
-        if self.frame >= self.totalFrame - 10:
-            self.gifOpacity.setOpacity((self.totalFrame - self.frame) / 10)
-            self.textOpacity.setOpacity((self.totalFrame - self.frame) / 10)
+        if self.frame >= self.totalFrame - 5:
+            self.gifOpacity.setOpacity(0)
+            self.textOpacity.setOpacity(0)
+            self.frame -= 1
+        elif self.frame >= self.totalFrame - 15:
+            self.gifOpacity.setOpacity((self.totalFrame - self.frame - 5) / 10)
+            self.textOpacity.setOpacity((self.totalFrame - self.frame - 5) / 10)
             self.frame -= 1
         elif self.frame > 40:
             self.frame -= 1

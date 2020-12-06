@@ -42,6 +42,7 @@ class previewLabel(QLabel):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.setFixedWidth(540)
         self.sound = QMediaPlayer()
         self.executeToken = False
         self.setAcceptDrops(True)
@@ -93,7 +94,11 @@ class MainWindow(QMainWindow):
         self.GIFWidget.showText.w = self.outSize / 250
         self.GIFWidget.setBackgroundColor(self.config['background_color'])
         self.GIFWidget.finish.connect(self.animateFinish)
+        self.GIFWidget.moveDelta.connect(self.changeCenter)
         self.GIFWidget.setText(self.config['0']['words'], 'gift')
+        w, h = self.GIFWidget.width(), self.GIFWidget.height()
+        x, y = self.GIFWidget.pos().x(), self.GIFWidget.pos().y()
+        self.GIFWidgetCenterPos = QPoint(x + w / 2, y + h / 2)
 
         self.setWindowTitle('DD答谢机 V1.0  (by 执明神君)')
         self.main_widget = QWidget()
@@ -233,7 +238,11 @@ class MainWindow(QMainWindow):
 
     def resizeGIFWidget(self):
         self.GIFWidget.resize(300, 200)
-        self.resize(540, 500)
+        self.resize(540, 600)
+        w, h = self.GIFWidget.width(), self.GIFWidget.height()
+        x, y = self.GIFWidget.pos().x(), self.GIFWidget.pos().y()
+        currentCenterPos = QPoint(x + w / 2, y + h / 2)
+        self.GIFWidget.move(self.GIFWidget.pos() - currentCenterPos + self.GIFWidgetCenterPos)
 
     def changePreset(self, index):
         if index == 9:
@@ -517,12 +526,14 @@ class MainWindow(QMainWindow):
         self.GIFWidget.ID = uid
         self.GIFWidget.number = str(num)
         self.GIFWidget.gift = gift
+        self.GIFWidget.gifOpacity.setOpacity(0)
+        self.GIFWidget.textOpacity.setOpacity(0)
         if gift == 'captain':
             self.setConfig(self.config['9'], 'captain', 9)
             self.GIFWidget.animationTimer.start()
             presetIndex = '9'
         else:
-            for presetIndex in [str(x) for x in range(9)]:
+            for presetIndex in ['8', '7', '6', '5', '4', '3', '2', '1', '0']:
                 if gift in self.config[presetIndex]['gift']:
                     self.setConfig(self.config[presetIndex], 'gift', int(presetIndex))
                     self.GIFWidget.animationTimer.start()
@@ -541,6 +552,9 @@ class MainWindow(QMainWindow):
 
     def animateFinish(self):
         self.sound.stop()
+
+    def changeCenter(self, qpoint):
+        self.GIFWidgetCenterPos += qpoint
 
     def startMonitor(self):
         if not self.executeToken:
@@ -592,8 +606,10 @@ if __name__ == '__main__':
     app.setFont(QFont('微软雅黑', 9))
     mainWindow = MainWindow()
     screen = app.primaryScreen().geometry()
-    w, h = 540, 500
+    w, h = 540, 600
     mainWindow.resize(w, h)
     mainWindow.move((screen.width() - w) / 2 - 300, (screen.height() - h) / 2)
     mainWindow.show()
+    mainWindow.GIFWidget.hide()
+    mainWindow.GIFWidget.show()
     sys.exit(app.exec_())
